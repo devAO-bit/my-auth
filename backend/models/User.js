@@ -3,7 +3,7 @@ import bcrypt from "bcryptjs";
 import crypto from "crypto";
 
 const userSchema = new mongoose.Schema({
- // Core auth
+  // Core auth
   name: { type: String, required: true, trim: true },
   email: {
     type: String,
@@ -34,7 +34,12 @@ const userSchema = new mongoose.Schema({
   metadata: mongoose.Schema.Types.Mixed,
 
   // Auth security
-  refreshToken: { type: String, select: false },
+  refreshToken: [
+    {
+      token: { type: String, required: true },
+      createdAt: { type: Date, default: Date.now }
+    }
+  ],
   passwordResetToken: { type: String, select: false },
   passwordResetExpires: Date,
   loginAttempts: { type: Number, default: 0 },
@@ -74,6 +79,7 @@ userSchema.pre("save", async function (next) {
   if (!this.isModified("password")) return next();
   const salt = await bcrypt.genSalt(12);
   this.password = await bcrypt.hash(this.password, salt);
+  this.lastPasswordChange = new Date();
   next();
 });
 
@@ -101,6 +107,38 @@ userSchema.methods.generatePasswordResetToken = function () {
   this.passwordResetToken = crypto.createHash("sha256").update(resetToken).digest("hex");
   this.passwordResetExpires = Date.now() + 10 * 60 * 1000; // 10 min
   return resetToken;
+};
+
+// Helpers for lockout
+userSchema.methods.incrementLoginAttempts = function () {
+  this.loginAttempts += 1;
+  if (this.loginAttempts >= 5) {
+    this.lockUntil = Date.now() + 1000 * 60 * 60;
+  }
+  return this.save();
+};
+
+userSchema.methods.resetLoginAttempts = function () {
+  this.loginAttempts = 0;
+  this.lockUntil = undefined;
+  return this.save();
+};
+
+// Check if account is currently locked
+userSchema.virtual("isLocked").get(function () {
+  return !!(this.lockUntil && this.lockUntil > Date.now());
+});
+
+// Remove refresh token
+userSchema.methods.removeRefreshToken = async function (token) {
+  this.refreshToken = this.refreshToken.filter(rt => rt.token !== token);
+  await this.save({ validateBeforeSave: false });
+};
+
+// Clear all refresh tokens (logout everywhere)
+userSchema.methods.clearRefreshTokens = async function () {
+  this.refreshToken = [];
+  await this.save({ validateBeforeSave: false });
 };
 
 export default mongoose.model("User", userSchema);
