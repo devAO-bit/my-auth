@@ -57,11 +57,12 @@ export const logoutController = asyncHandler(async (req, res) => {
     const { refreshToken } = req.body;
 
     await logoutUser(req.user.id, refreshToken);
-
-    res.status(200).json({
-        status: "success",
-        message: "Logged out successfully",
+    res.clearCookie('refresh_token', {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
     });
+    res.status(200).json({ message: 'Logged out successfully' });
 });
 
 // Logout from all devices
